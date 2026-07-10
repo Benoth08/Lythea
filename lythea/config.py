@@ -247,6 +247,21 @@ CATALOG: dict[str, ModelSpec] = {
             temperature=0.6, top_p=0.95, top_k=20, repetition_penalty=1.0,
         ),
     ),
+    "deepreinforce-ai/Ornith-1.0-9B": ModelSpec(
+        model_id="deepreinforce-ai/Ornith-1.0-9B",
+        label="Ornith-1.0-9B (Thinking)",
+        size_gb=19.0,            # dense ~9B bf16 ; quant_4bit=True -> ~6 Go
+        is_thinking=True,
+        notes=("Modele de raisonnement (deepreinforce-ai, 2026) : bloc <think> "
+               "natif + tool-calling (format qwen3_xml), contexte 128K, base "
+               "Qwen3.5. Dense ~9B, tient sur un seul GPU. Peut exiger "
+               "trust_remote_code au chargement. Modele THINKING : verifier la "
+               "compat avec agent ReAct (le bloc <think> peut gener le format "
+               "des outils). Sur 24 Go serres, passer quant_4bit=True (~6 Go)."),
+        sampling=SamplingProfile(
+            temperature=0.6, top_p=0.95, top_k=20, repetition_penalty=1.0,
+        ),
+    ),
     # ════════════════════════════════════════════════════════════════════
     # Section 3 — DUAL-MODE (instruct + thinking via /think)
     # ════════════════════════════════════════════════════════════════════
@@ -550,6 +565,9 @@ WEB_STABILITY_THRESHOLD = _settings.web_stability_threshold
 # Microsleep
 MICROSLEEP_INTERVAL = _settings.microsleep_interval
 MICROSLEEP_INACTIVITY = _settings.microsleep_inactivity
+# V5.9 — inactivité (s) au-delà de laquelle un DEEP sleep auto se déclenche
+# (purges + persistance agressive). Bien plus long que le microsleep.
+DEEP_SLEEP_INACTIVITY = getattr(_settings, "deep_sleep_inactivity", 1800.0)
 MICROSLEEP_REHEARSE_K = _settings.microsleep_rehearse_k
 MICROSLEEP_BOOST = _settings.microsleep_boost
 

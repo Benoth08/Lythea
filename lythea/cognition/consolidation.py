@@ -52,6 +52,7 @@ from lythea.config import (
     MHN_DIR,
     MICROSLEEP_BOOST,
     MICROSLEEP_INACTIVITY,
+    DEEP_SLEEP_INACTIVITY,
     MICROSLEEP_INTERVAL,
     MICROSLEEP_REHEARSE_K,
     SDM_DIR,
@@ -114,6 +115,7 @@ class ConsolidationPhase:
         self._microsleep_lock = threading.Lock()
         self._microsleep_pending: bool = False
         self._inactivity_timer: threading.Timer | None = None
+        self._deep_sleep_timer: threading.Timer | None = None
         self._last_microsleep_ts: float = time.time()
 
         # The orchestrator updates this through its bookkeeping;
@@ -202,6 +204,15 @@ class ConsolidationPhase:
         )
         self._inactivity_timer.daemon = True
         self._inactivity_timer.start()
+        # V5.9 — second timer, plus long : sommeil profond auto sur
+        # inactivité prolongée (purges + persistance agressive).
+        if self._deep_sleep_timer is not None:
+            self._deep_sleep_timer.cancel()
+        self._deep_sleep_timer = threading.Timer(
+            DEEP_SLEEP_INACTIVITY, self._deep_sleep_on_inactivity,
+        )
+        self._deep_sleep_timer.daemon = True
+        self._deep_sleep_timer.start()
 
     def cancel_inactivity_timer(self) -> None:
         """Cancel any pending inactivity timer.
@@ -212,6 +223,25 @@ class ConsolidationPhase:
         if self._inactivity_timer is not None:
             self._inactivity_timer.cancel()
             self._inactivity_timer = None
+        if self._deep_sleep_timer is not None:
+            self._deep_sleep_timer.cancel()
+            self._deep_sleep_timer = None
+
+    def _deep_sleep_on_inactivity(self) -> None:
+        """V5.9 — Deep sleep auto-déclenché après inactivité prolongée.
+
+        Ne tourne que si aucun microsleep n'est en cours (lock non
+        bloquant), pour ne pas entrer en conflit avec une consolidation
+        active. Best-effort : n'interrompt jamais rien.
+        """
+        if not self._microsleep_lock.acquire(blocking=False):
+            return  # microsleep en cours — se refera au prochain cycle
+        try:
+            self.deep_sleep()
+        except Exception:
+            log.exception("Deep sleep on inactivity failed")
+        finally:
+            self._microsleep_lock.release()
 
     def deep_sleep(self) -> str:
         """Aggressive prune + persist. SDM flushed, MHN preserved.

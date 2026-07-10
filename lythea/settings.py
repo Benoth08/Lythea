@@ -236,6 +236,7 @@ class LytheaSettings(BaseSettings):
     agent_skills_dirs: list[str] = Field(default_factory=list)
     agent_ollama_workers: list[str] = Field(default_factory=list)
     agent_ollama_base_url: str = Field(default="")
+    deep_sleep_inactivity: int = Field(default=1800, ge=10, le=86400)  # V5.9 — deep sleep auto (s)
     microsleep_inactivity: int = Field(default=180, ge=10, le=86400)
     microsleep_rehearse_k: int = Field(default=16, ge=1, le=1024)
     microsleep_boost: float = Field(default=0.15, ge=0.0, le=10.0)
@@ -496,6 +497,7 @@ class LytheaSettings(BaseSettings):
     pc_high_threshold: float = Field(default=0.65, ge=0.0, le=2.0)
     # Confidence cap on prediction-error gating decisions.
     pc_confidence_cap: float = Field(default=0.85, ge=0.0, le=1.0)
+    pc_gating_w_sdm: float = Field(default=0.0, ge=0.0, le=1.0)  # V5.9 — poids SDM dans le gating (0 = off)
     # When True, the gating decision actually influences runtime
     # behaviour (e.g. suppresses non-essential web search in low_power
     # mode). When False, decisions are computed for telemetry but

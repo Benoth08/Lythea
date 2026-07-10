@@ -138,6 +138,7 @@ class PredictiveCodingConfig:
     low_threshold: float = 0.15
     high_threshold: float = 0.65
     confidence_cap: float = 0.85
+    gating_w_sdm: float = 0.0  # V5.9 — poids du signal SDM dans l'erreur de gating (0 = EMA seule)
     # V4.0.2 — auto-calibration of error thresholds.
     # When ``auto_calibrate=True`` (default), the module observes its
     # own ``error`` distribution after cold-start. Once
@@ -220,7 +221,7 @@ class PredictiveCodingPhase:
             and self._auto_thresholds.is_bootstrapping(self._auto_calibrator)
         )
 
-    def observe(self, embedding: Sequence[float] | None) -> GatingDecision:
+    def observe(self, embedding: Sequence[float] | None, sdm_error: float | None = None) -> GatingDecision:
         """Compare `embedding` with the EMA prediction; classify mode.
 
         Pipeline
@@ -239,7 +240,7 @@ class PredictiveCodingPhase:
         8. Cache last_decision for telemetry.
         """
         try:
-            return self._observe_inner(embedding)
+            return self._observe_inner(embedding, sdm_error)
         except Exception:
             log.warning("PredictiveCodingPhase.observe crashed", exc_info=True)
             return GatingDecision(
@@ -249,7 +250,7 @@ class PredictiveCodingPhase:
                 reason="error: internal crash, falling back to full",
             )
 
-    def _observe_inner(self, embedding: Sequence[float] | None) -> GatingDecision:
+    def _observe_inner(self, embedding: Sequence[float] | None, sdm_error: float | None = None) -> GatingDecision:
         # 1. Validate
         if embedding is None or len(embedding) == 0:
             decision = GatingDecision(
@@ -302,8 +303,16 @@ class PredictiveCodingPhase:
             self.last_decision = decision
             return decision
 
-        # 4. Error
-        error = cosine_distance(predicted, obs)
+        # 4. Error (EMA) + injection SDM (V5.9)
+        error_ema = cosine_distance(predicted, obs)
+        w = float(getattr(self.config, "gating_w_sdm", 0.0) or 0.0)
+        if sdm_error is not None and w > 0.0:
+            try:
+                error = (1.0 - w) * error_ema + w * float(sdm_error)
+            except (TypeError, ValueError):
+                error = error_ema
+        else:
+            error = error_ema
 
         # V4.0.2 — Feed the auto-calibrator BEFORE deciding so the
         # current observation also informs its own band post-bootstrap.
@@ -330,6 +339,20 @@ class PredictiveCodingPhase:
         if self.config.auto_calibrate:
             src = "bootstrap" if self.is_bootstrapping() else "empirical"
             reason = f"{reason} [{src}]"
+
+        # V5.9 — logging de divergence SDM (juge de l'ablation)
+        if sdm_error is not None and w > 0.0:
+            if error_ema < low_thr:
+                _mode_ema = "low_power"
+            elif error_ema > high_thr:
+                _mode_ema = "high"
+            else:
+                _mode_ema = "full"
+            if _mode_ema != mode:
+                log.info(
+                    "PC gating divergence: EMA=%.3f->%s | +SDM(err=%.3f,w=%.2f)=%.3f->%s",
+                    error_ema, _mode_ema, float(sdm_error), w, error, mode,
+                )
 
         # 6. Confidence — peaks at extremes, dips in middle.
         # |error - 0.4| has max ~1.0 (at error=0 or error=1.4 capped to 1.0)
